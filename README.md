@@ -5,7 +5,7 @@ A simple remote access trojan, created so I can learn more about malware.
 - [x] A simple shell interface for server
 - [x] Add command to spawn remote powershell
 - [x] Add command to get file from client
-- [ ] Add command to take screenshots
+- [x] Add command to take screenshots
 - [ ] Add persistence
 - [x] Add some error handling routines for the commands
 - [ ] Add a log for each session.

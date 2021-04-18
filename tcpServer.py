@@ -136,7 +136,7 @@ def recvCommandStatus(c):
     c.setblocking(True)
     return struct.unpack("<i", status)[0]
     
-addr = ("localhost", 8888)
+addr = ("0.0.0.0", 8888)
 s = socket.socket()
 s.bind(addr)
 s.listen(1)
